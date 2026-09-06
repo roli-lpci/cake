@@ -270,7 +270,7 @@ pre-push-docs:
     @python3 scripts/lint-domain-glossary.py
 
 # Run all CI fixture suites as part of full local validation
-_check-fixtures: dependency-sweep-check profile-check binary-size-baseline-check test-classify-changes test-just-pr
+_check-fixtures: dependency-sweep-check profile-check binary-size-baseline-check test-classify-changes test-just-pr eval-check session-metrics-check
     @:
 
 # Run the Linux compatibility check corresponding to GitHub Actions

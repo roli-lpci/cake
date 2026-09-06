@@ -81,6 +81,17 @@ commit_files scripts-1 scripts/helper.sh "helper"
 expect_class scripts-1 code
 expect_files scripts-1 ""
 
+# Offline tooling sources and fixtures must take the code route so CI runs
+# eval-check and session-metrics-check, including nested fixture paths.
+commit_files eval-source scripts/evals/run_eval.py "source"
+expect_class eval-source code
+commit_files eval-fixture scripts/evals/tests/test_eval.py "fixture"
+expect_class eval-fixture code
+commit_files metrics-source scripts/session-metrics/report.py "source"
+expect_class metrics-source code
+commit_files metrics-fixture scripts/session-metrics/tests/test_overview.py "fixture"
+expect_class metrics-fixture code
+
 # mixed: both Markdown and code paths changed
 commit_files mixed-1 scripts/helper.sh "helper" docs/readme.md "readme"
 expect_class mixed-1 mixed
