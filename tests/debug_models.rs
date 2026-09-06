@@ -12,6 +12,37 @@ fn cake_env() -> TestEnv {
     TestEnv::new("cake-debug-models-test")
 }
 
+#[cfg(unix)]
+#[test]
+fn debug_skills_deleted_current_directory_is_an_input_error() {
+    for subcommand in ["skills", "models"] {
+        let env = cake_env();
+        let output = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "rmdir \"$1\"; exec \"$2\" debug \"$3\"",
+                "deleted-cwd",
+            ])
+            .arg(&env.workspace_dir)
+            .arg(env.command().get_program())
+            .arg(subcommand)
+            .current_dir(&env.workspace_dir)
+            .env("CAKE_DATA_DIR", &env.data_dir)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "{subcommand}: {:?}",
+            output.stderr
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Failed to get current directory")
+        );
+        assert!(output.stdout.is_empty());
+    }
+}
+
 #[test]
 fn debug_skills_respects_profiles_and_cli_filters_without_a_model() {
     let env = cake_env();

@@ -150,10 +150,15 @@ def main() -> int:
         print(f"  {count:6d}  {relpath}{suffix}")
 
     if args.skill_catalog:
-        result = subprocess.run(
-            [os.path.abspath(args.skill_catalog), "debug", "skills"],
-            cwd=root, check=False,
-        )
+        binary = os.path.abspath(args.skill_catalog)
+        try:
+            result = subprocess.run([binary, "debug", "skills"], cwd=root, check=False)
+        except OSError as error:
+            print(
+                f"ERROR: could not run skill catalog binary '{binary}': {error.strerror}",
+                file=sys.stderr,
+            )
+            return 1
         if result.returncode:
             return result.returncode
 
