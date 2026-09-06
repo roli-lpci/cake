@@ -91,3 +91,7 @@ The final PR body and issue #502 acceptance comment will include an exact remova
 ## Interfaces and Dependencies
 
 The sweep relies on Rust's existing test harness, `cargo test`, `cargo insta` snapshots where applicable, and the repository's `just` recipes. It must preserve the public CLI binary, OpenAI-compatible backend request/response shapes, session JSONL and stream records, hook/toolbox protocols, sandbox policy, and all documented exit behavior. No dependency or wire-format change is in scope.
+
+## Revision note
+
+- (2026-09-05) Filled the outcomes ledger, verification results, and final lifecycle progress after the 60-test deletion pass; archived the plan before opening PR #503. The coverage threshold failure is recorded rather than hidden with low-value tests.
