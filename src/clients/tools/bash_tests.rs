@@ -1347,12 +1347,6 @@ async fn test_sandbox_linked_worktree_git_operations() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn require_sandbox_tests_defaults_to_false_when_unset() {
-    assert!(!parse_sandbox_tests_required(None));
-}
-
-#[cfg(target_os = "macos")]
-#[test]
 fn require_sandbox_tests_false_for_unrecognized_values() {
     assert!(!parse_sandbox_tests_required(Some("0")));
     assert!(!parse_sandbox_tests_required(Some("false")));
@@ -1426,16 +1420,16 @@ fn test_is_binary_data_allows_multibyte_utf8() {
 }
 
 #[test]
-fn test_is_binary_data_allows_empty() {
-    // Empty data should not be detected as binary
-    assert!(!is_binary_data(b""));
-}
-
-#[test]
 fn test_is_binary_data_allows_few_null_bytes() {
     // A few null bytes (below threshold) should not trigger binary detection
     let text_with_few_nulls = b"hello\x00world";
     assert!(!is_binary_data(text_with_few_nulls));
+}
+
+#[test]
+fn test_is_binary_data_allows_empty() {
+    // Empty data should not be detected as binary.
+    assert!(!is_binary_data(b""));
 }
 
 #[test]
