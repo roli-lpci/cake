@@ -1040,17 +1040,66 @@ async fn test_sandbox_danger_full_access_allows_write_outside_cwd() {
 // Linked Worktree Sandbox Tests (task 260)
 // ===========================================================================
 
-/// Build bash tool arguments that run `git` without masking the inherited
-/// environment. The Bash executor owns removal of repository-pinning variables,
-/// so this helper must exercise the real child environment.
+/// Build bash tool arguments that run `git` with fixture-only configuration
+/// and identity variables dropped. Repository-pinning variables intentionally
+/// remain for the Bash executor's production scrub to remove after sandbox
+/// application, so this helper exercises that real child environment.
 #[cfg(target_os = "macos")]
 fn sandboxed_git(args: &[&str]) -> String {
-    let mut command = String::from("git");
+    let mut command = String::from("env");
+    for var in crate::config::git::FIXTURE_ENV_VARS {
+        command.push_str(" -u ");
+        command.push_str(var);
+    }
+    command.push_str(" git");
     for arg in args {
         command.push(' ');
         command.push_str(&shell_quote(arg));
     }
     serde_json::json!({ "command": command }).to_string()
+}
+
+/// The fixture command must isolate fixture-only variables locally while
+/// leaving production ambient-variable scrubbing to `execute_bash`.
+#[cfg(target_os = "macos")]
+#[test]
+fn sandboxed_git_isolates_fixture_vars_without_scrubbing_ambient_vars() {
+    let arguments = sandboxed_git(&["config", "--get", "cake.sentinel"]);
+    let payload: serde_json::Value =
+        serde_json::from_str(&arguments).expect("sandboxed git arguments must be valid JSON");
+    let command = payload["command"]
+        .as_str()
+        .expect("sandboxed git arguments must contain a command");
+
+    for var in crate::config::git::FIXTURE_ENV_VARS {
+        assert!(
+            command.contains(&format!(" -u {var} ")),
+            "fixture helper must drop {var}: {command}"
+        );
+    }
+    for var in crate::config::git::AMBIENT_ENV_VARS {
+        assert!(
+            !command.contains(&format!(" -u {var} ")),
+            "fixture helper must leave production scrubbing of {var} to Bash: {command}"
+        );
+    }
+
+    let fixture = tempfile::tempdir().expect("fixture repository");
+    crate::config::git::test_support::init_repo(fixture.path());
+    let output = std::process::Command::new("bash")
+        .args(["-c", command])
+        .current_dir(fixture.path())
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "cake.sentinel")
+        .env("GIT_CONFIG_VALUE_0", "leaked")
+        .output()
+        .expect("fixture git command must spawn");
+
+    assert!(
+        !output.status.success(),
+        "fixture command must not see command-scope config from its environment: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
 /// A model-run Git command must discover the repository from the Bash working
