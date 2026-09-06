@@ -11,16 +11,16 @@ Cake's tests should protect behavior that users, providers, extensions, and main
 - [x] (2026-09-05) Confirmed a clean `master` synchronized with `origin/master` at `3bebb6e`.
 - [x] (2026-09-05) Created and claimed GitHub issue #502; added this plan as the implementation record.
 - [x] (2026-09-05) Inventoried the Rust test modules and classified candidates against CLI, wire, persistence, security, hook/toolbox, concurrency, and configuration contracts.
-- [x] (2026-09-05) Removed 60 confirmed low-value tests across 20 files, with the exact category and file ledger recorded below.
+- [x] (2026-09-05) Removed 58 confirmed low-value tests across 19 files after independent review restored two non-subsumed boundary tests; exact category and file accounting appears below.
 - [x] (2026-09-05) Reviewed production seams after deletion; no production simplification was justified because every remaining test-only seam still has retained behavioral consumers or production call sites. Removed only the deleted tests' private helpers (`test_hook_runner` and `REGISTRY_MAPPING`).
-- [x] (2026-09-05) Ran focused/full Rust checks, `just check`, coverage/change-risk/CC gates, dependency advisories, rustdoc, Markdown checks, fixtures, and a release build; the coverage threshold remains the only failing gate.
+- [x] (2026-09-05) Ran focused/full Rust checks, `just check`, coverage/change-risk/CC gates, dependency advisories, rustdoc, Markdown checks, fixtures, and a release build. Independent review resolved the initial coverage failure with supported workspace artifact cleanup.
 - [x] (2026-09-05) Updated issue #502 acceptance notes and linked this completed plan; pushed the branch and opened the pull request.
 
 ## Surprises & Discoveries
 
 - The repository contains 65 Rust files with test attributes, 1,516 test attributes/locations reported by the initial search, 4,081 assertion lines, and 125 snapshot-related calls; the initial counts include production and test support code and were not used as final removal counts.
 - The project board currently has more than 200 items. The checked-in `scripts/claim-issue.sh` only reads 200 items, so issue #502 had to be claimed with the same documented GraphQL status mutation after verifying the item at a larger limit. This is workflow tooling context, not part of the code change.
-- The coverage recipe reports duplicate `cake-1/...` and `cake/cake-1/...` source roots under this checkout and fails its configured 90% total threshold at 33.66%, while its CRAP regression and cyclomatic-complexity gates pass. The test sweep did not add tests to inflate that metric or change production code to mask it.
+- The initial coverage report contained both `/Users/travisennis/Projects/cake-1/` and `/Users/travisennis/Projects/cake/cake-1/` source roots and reported 33.66%. With cargo-llvm-cov 0.9.0, `cargo llvm-cov clean --workspace` followed by `just check-coverage` removed the duplicate roots and passed at 94.53%, including CRAP and complexity gates, before any test restoration. The recipe's existing `--profraw-only` cleanup had not removed the stale workspace artifacts. No coverage-related environment overrides were present in the review shell; the exact origin of the stale artifacts was not established.
 
 ## Decision Log
 
@@ -30,19 +30,21 @@ Cake's tests should protect behavior that users, providers, extensions, and main
 
 ## Outcomes & Retrospective
 
-The sweep removed 60 tests from 20 files. The categories are intentionally non-overlapping:
+The sweep removed 58 tests from 19 files. The categories are intentionally non-overlapping:
 
-- **24 duplicate behavioral checks**, retained behavior in stronger snapshots or neighboring cases: `src/cli/debug.rs` (2), `src/cli/replay.rs` (1), `src/clients/agent/agent_tests.rs` (2), `src/clients/chat_completions_tests.rs` (1), `src/clients/responses_tests.rs` (2), `src/clients/tools/read.rs` (1), `src/config/session.rs` (2), `src/main_tests.rs` (9), and `src/prompts/mod.rs` (6).
-- **23 trivial, derived, no-op, or pass-through checks**: `src/cli/output.rs` (1), `src/cli/sessions.rs` (2), `src/clients/agent/agent_tests.rs` (4), `src/clients/agent_state.rs` (3), `src/clients/tools/bash_tests.rs` (2), `src/clients/tools/mod.rs` (4), `src/clients/tools/toolbox_tests.rs` (2), `src/config/data_dir.rs` (2), `src/config/session.rs` (1), `src/time_format.rs` (1), and `src/types/usage.rs` (1).
+- **24 duplicate behavioral checks**, retained behavior in stronger snapshots or neighboring cases: `src/cli/debug.rs` (2), `src/cli/replay.rs` (1), `src/clients/chat_completions_tests.rs` (1), `src/clients/responses_tests.rs` (2), `src/clients/tools/read.rs` (1), `src/config/session.rs` (2), `src/main_tests.rs` (9), and `src/prompts/mod.rs` (6).
+- **21 trivial, derived, no-op, or pass-through checks**: `src/cli/output.rs` (1), `src/cli/sessions.rs` (2), `src/clients/agent/agent_tests.rs` (4), `src/clients/agent_state.rs` (2), `src/clients/tools/bash_tests.rs` (2), `src/clients/tools/mod.rs` (4), `src/clients/tools/toolbox_tests.rs` (2), `src/config/data_dir.rs` (2), `src/config/session.rs` (1), and `src/types/usage.rs` (1).
 - **13 implementation-coupled or reimplemented checks**: `src/clients/chat_completions_tests.rs` (3), `src/clients/judge_rubric_tests.rs` (1), `src/clients/responses_tests.rs` (1), `src/clients/tools/mod.rs` (4), and `src/types/conversation.rs` (4).
+
+Independent review corrected the original duplicate row (which summed to 26 and counted two agent tests again) and restored `seconds_tenths_handles_max_milliseconds_without_overflowing` and `resolve_assistant_message_from_past_end_is_none`. The former detects overflow at `u128::MAX`, unlike ordinary rounding cases; the latter detects out-of-range slicing, unlike the retained exact-end case. Neither restoration is for coverage inflation.
 
 The complete names are preserved in the issue and PR accounting. No production code changed: the only non-production cleanup was removing the deleted tests' private `test_hook_runner` and `REGISTRY_MAPPING` fixtures. Retained tests still cover the documented CLI, exit, provider wire, session JSONL, prompt/configuration, tool/sandbox, hook/toolbox, scheduling, concurrency, and error/security contracts. No documentation or ADR update was needed because no user-visible or durable contract changed.
 
 ### Verification
 
-`cargo fmt -- --check`, `cargo test --all-features --quiet`, and `just check` passed. The full local route reached its Linux check, fixture suites, and Rust checks; `scripts/check-coverage.sh` reported total coverage `33.66%` versus the configured `90%` threshold, while CRAP regression and cyclomatic-complexity gates passed. The remaining `just check-full` stages were run independently and passed: `just check-deps`, `just doc`, `just docs-check`, and `just build`.
+After the two boundary restorations, `just check-full` passed end to end: formatting, strict Clippy in both feature modes, all-feature tests (1,385 unit tests passed, 2 ignored, plus 93 integration tests), Linux compatibility, fixtures, coverage at 94.53%, CRAP regression, cyclomatic complexity, dependency checks, rustdoc, Markdown checks, and release build. Both restored tests also passed individually via `cargo test seconds_tenths_handles_max_milliseconds_without_overflowing --quiet` and `cargo test resolve_assistant_message_from_past_end_is_none --quiet`. `git diff --check` passed. The original PR head's nine hosted CI checks were all successful when inspected; the review commit requires its own hosted run.
 
-The coverage failure is an outstanding repository/tooling gate issue, not a behavioral test failure. It is recorded rather than addressed by adding low-value tests.
+The initial coverage failure was resolved by supported artifact cleanup rather than by adding low-value tests. Independent review verified the removed names against the Git diff and retained the private fixture cleanup; no production seam cleanup was justified.
 
 ## Context and Orientation
 
@@ -94,4 +96,5 @@ The sweep relies on Rust's existing test harness, `cargo test`, `cargo insta` sn
 
 ## Revision note
 
-- (2026-09-05) Filled the outcomes ledger, verification results, and final lifecycle progress after the 60-test deletion pass; archived the plan before opening PR #503. The coverage threshold failure is recorded rather than hidden with low-value tests.
+- (2026-09-05) Filled the initial outcomes ledger and archived the plan before opening PR #503.
+- (2026-09-05) Independent review corrected double-counted agent tests, restored two distinct boundary cases, reconciled the final 58-test ledger, and resolved stale coverage artifacts with `cargo llvm-cov clean --workspace`.

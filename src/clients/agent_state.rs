@@ -296,6 +296,12 @@ mod tests {
         );
     }
 
+    #[test]
+    fn resolve_assistant_message_from_past_end_is_none() {
+        let state = ConversationState::new(&[(Role::System, "sys".to_string())]);
+        assert!(state.resolve_assistant_message_from(10).is_none());
+    }
+
     fn user_message(content: &str) -> ConversationItem {
         ConversationItem::Message {
             role: Role::User,
