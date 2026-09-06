@@ -1040,31 +1040,78 @@ async fn test_sandbox_danger_full_access_allows_write_outside_cwd() {
 // Linked Worktree Sandbox Tests (task 260)
 // ===========================================================================
 
-/// Build bash tool arguments that run `git` with the inherited repository and
-/// configuration variables dropped.
-///
-/// The bash tool passes cake's environment to the child, so a `GIT_DIR`
-/// inherited from whoever launched the test suite would send these commands
-/// at that repository instead of the fixture worktree. These commands carry
-/// no `-c` options of their own, so inherited command-scope configuration
-/// would also outrank the fixture's local settings, including its pinned
-/// `core.hooksPath`.
+/// Build bash tool arguments that run `git` without masking the inherited
+/// environment. The Bash executor owns removal of repository-pinning variables,
+/// so this helper must exercise the real child environment.
 #[cfg(target_os = "macos")]
 fn sandboxed_git(args: &[&str]) -> String {
-    let mut command = String::from("env");
-    for var in crate::config::git::AMBIENT_ENV_VARS
-        .iter()
-        .chain(crate::config::git::FIXTURE_ENV_VARS)
-    {
-        command.push_str(" -u ");
-        command.push_str(var);
-    }
-    command.push_str(" git");
+    let mut command = String::from("git");
     for arg in args {
         command.push(' ');
         command.push_str(&shell_quote(arg));
     }
     serde_json::json!({ "command": command }).to_string()
+}
+
+/// A model-run Git command must discover the repository from the Bash working
+/// directory even when Cake itself inherits a repository-pinning `GIT_DIR`.
+/// Keep the canary in the parent environment so the test exercises the child
+/// spawn, rather than an explicit `env` assignment in the model command.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn test_bash_git_ignores_inherited_git_dir_canary() {
+    if skip_if_sandbox_unavailable() {
+        return;
+    }
+
+    let workspace = tempfile::TempDir::new().expect("workspace fixture");
+    let canary = tempfile::TempDir::new().expect("canary fixture");
+    crate::config::git::test_support::init_repo(workspace.path());
+    crate::config::git::test_support::init_repo(canary.path());
+    let expected_git_dir = workspace
+        .path()
+        .join(".git")
+        .canonicalize()
+        .expect("workspace git directory");
+    let canary_git_dir = canary
+        .path()
+        .join(".git")
+        .canonicalize()
+        .expect("canary git directory");
+
+    let mut context =
+        ToolContext::from_current_process().with_judge(Some(bypassed_judge_context()));
+    context.cwd = workspace.path().to_path_buf();
+    context.sandbox_policy = SandboxPolicy::WorkspaceWrite;
+    let context = Arc::new(context);
+    let args = serde_json::json!({
+        "command": "git rev-parse --absolute-git-dir"
+    })
+    .to_string();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+
+    let result = temp_env::with_var("GIT_DIR", Some(&canary_git_dir), || {
+        runtime.block_on(execute_bash(&context, &args))
+    })
+    .expect("git rev-parse should run through Bash");
+
+    assert!(
+        result
+            .output
+            .contains(&expected_git_dir.display().to_string()),
+        "git should resolve the Bash workspace, got: {}",
+        result.output
+    );
+    assert!(
+        !result
+            .output
+            .contains(&canary_git_dir.display().to_string()),
+        "git must not resolve the inherited canary repository, got: {}",
+        result.output
+    );
 }
 
 /// Single-quote `value` for a POSIX shell.

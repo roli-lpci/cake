@@ -633,6 +633,14 @@ fn prepare_bash_command(
         None
     };
 
+    // Sandbox application may replace the Command (macOS wraps it with
+    // sandbox-exec), so scrub after application. These variables can redirect
+    // Git away from the Bash working directory and must not escape into the
+    // child, regardless of the selected sandbox policy.
+    for var in crate::config::git::AMBIENT_ENV_VARS {
+        command.env_remove(var);
+    }
+
     Ok(PreparedBashCommand {
         command,
         sandbox_applied: sandbox_guard.is_some(),
