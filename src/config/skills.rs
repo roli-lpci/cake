@@ -302,6 +302,59 @@ impl Skill {
 // =============================================================================
 
 impl SkillCatalog {
+    /// Report the actual rendered catalog without changing its contents.
+    ///
+    /// Budgets are advisory Unicode-scalar counts. The token estimate is
+    /// ceil(characters / 4), not a provider tokenizer or a context guarantee.
+    pub fn size_report(&self, catalog_budget: usize, description_budget: usize) -> String {
+        use std::fmt::Write;
+
+        let xml = self.to_prompt_xml();
+        let characters = xml.chars().count();
+        let mut report = format!(
+            "Skill catalog: {} skills, {} bytes, {characters} characters, ~{} tokens \
+             (ceil(characters / 4); not a provider token count).\n\
+             Advisory thresholds: {catalog_budget} catalog characters; \
+             {description_budget} description characters.\n",
+            self.skills.len(),
+            xml.len(),
+            characters.div_ceil(4),
+        );
+        if characters > catalog_budget {
+            _ = writeln!(
+                report,
+                "WARNING: rendered catalog exceeds the advisory budget."
+            );
+        }
+        let mut descriptions: Vec<_> = self.skills.iter().collect();
+        descriptions.sort_by(|left, right| {
+            right
+                .description
+                .chars()
+                .count()
+                .cmp(&left.description.chars().count())
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        for skill in descriptions {
+            let count = skill.description.chars().count();
+            let warning = if count > description_budget {
+                " WARNING"
+            } else {
+                ""
+            };
+            _ = writeln!(
+                report,
+                "  {count} description characters: {}{warning}",
+                skill.name
+            );
+        }
+        report.push_str(
+            "Reduce the catalog with skills.only, a skills profile, or --no-skills. \
+             Thresholds do not truncate descriptions or remove skills.\n",
+        );
+        report
+    }
+
     /// Create an empty skill catalog.
     #[must_use]
     pub const fn empty() -> Self {

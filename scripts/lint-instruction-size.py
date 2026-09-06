@@ -29,7 +29,9 @@ Exit code is 1 when AGENTS.md exceeds its cap.
 
 from __future__ import annotations
 
+import argparse
 import os
+import subprocess
 import sys
 
 # Policy cap on AGENTS.md in prose words. AGENTS.md is the one document loaded
@@ -120,6 +122,12 @@ def main() -> int:
     """Check AGENTS.md against its cap and report the corpus."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(script_dir)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--skill-catalog", metavar="CAKE_BINARY",
+        help="also run the native read-only skill catalog report with this Cake binary",
+    )
+    args = parser.parse_args()
 
     files = find_instruction_files(root)
     if not files:
@@ -140,6 +148,14 @@ def main() -> int:
     for relpath, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
         suffix = f" (cap {AGENTS_CAP})" if relpath == "AGENTS.md" else ""
         print(f"  {count:6d}  {relpath}{suffix}")
+
+    if args.skill_catalog:
+        result = subprocess.run(
+            [os.path.abspath(args.skill_catalog), "debug", "skills"],
+            cwd=root, check=False,
+        )
+        if result.returncode:
+            return result.returncode
 
     if violations:
         print("Instruction cap exceeded:", file=sys.stderr)

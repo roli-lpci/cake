@@ -241,6 +241,62 @@ fn catalog_to_prompt_xml_empty() {
 }
 
 #[test]
+fn catalog_size_report_measures_rendered_xml_without_mutation() {
+    let mut catalog = SkillCatalog::empty();
+    catalog.skills.push(Skill {
+        name: "routing".to_string(),
+        description: "é<&".to_string(),
+        location: PathBuf::from("/skills/routing/SKILL.md"),
+        base_directory: PathBuf::from("/skills/routing"),
+        scope: SkillScope::Project,
+    });
+    let xml = catalog.to_prompt_xml();
+    let report = catalog.size_report(8000, 3);
+    let characters = xml.chars().count();
+    assert!(report.contains(&format!("{} bytes, {characters} characters", xml.len())));
+    assert!(xml.contains("é&lt;&amp;"));
+    assert!(report.contains("3 description characters: routing\n"));
+    assert!(!report.contains("WARNING"));
+    assert_eq!(catalog.to_prompt_xml(), xml);
+
+    let report = catalog.size_report(characters - 1, 2);
+    assert!(report.contains("WARNING: rendered catalog exceeds"));
+    assert!(report.contains("routing WARNING"));
+    assert!(report.contains("skills.only"));
+    assert_eq!(catalog.to_prompt_xml(), xml);
+}
+
+#[test]
+fn catalog_size_report_empty_and_filtered() {
+    let dir = tempfile::tempdir().unwrap();
+    create_skill_file(dir.path(), "example", "A routing description");
+    let mut catalog = discover_skills_inner(dir.path(), &[dir.path().to_path_buf()], None);
+    assert_eq!(catalog.skills.len(), 1);
+    catalog.filter_to(&["absent".to_string()]);
+    assert_eq!(
+        catalog.size_report(0, 0),
+        SkillCatalog::empty().size_report(0, 0)
+    );
+    assert!(
+        catalog
+            .size_report(0, 0)
+            .contains("0 skills, 0 bytes, 0 characters, ~0 tokens")
+    );
+    assert!(!catalog.size_report(0, 0).contains("WARNING"));
+}
+
+#[test]
+fn catalog_size_report_orders_descriptions_largest_first() {
+    let dir = tempfile::tempdir().unwrap();
+    create_skill_file(dir.path(), "short", "small");
+    create_skill_file(dir.path(), "large", "a longer routing description");
+    let catalog = discover_skills_inner(dir.path(), &[dir.path().to_path_buf()], None);
+    let report = catalog.size_report(1, 10);
+    assert!(report.find(": large WARNING").unwrap() < report.find(": short\n").unwrap());
+    assert!(report.contains("WARNING: rendered catalog exceeds"));
+}
+
+#[test]
 fn catalog_to_prompt_xml_escapes() {
     let mut catalog = SkillCatalog::empty();
     catalog.skills.push(Skill {
