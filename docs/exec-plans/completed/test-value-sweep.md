@@ -10,16 +10,17 @@ Cake's tests should protect behavior that users, providers, extensions, and main
 
 - [x] (2026-09-05) Confirmed a clean `master` synchronized with `origin/master` at `3bebb6e`.
 - [x] (2026-09-05) Created and claimed GitHub issue #502; added this plan as the implementation record.
-- [ ] Inventory all test modules and classify candidate tests by behavioral value.
-- [ ] Remove confirmed low-value, tautological, implementation-coupled, and duplicate tests; record exact counts and files.
-- [ ] Simplify production code only where a removed test was the sole reason for an artificial seam, preserving behavior.
-- [ ] Run focused tests and the routed Rust gates, including proportionate full/coverage checks.
-- [ ] Update issue acceptance notes and plan outcomes, move this plan to `docs/exec-plans/completed/`, push the branch, and open a pull request.
+- [x] (2026-09-05) Inventoried the Rust test modules and classified candidates against CLI, wire, persistence, security, hook/toolbox, concurrency, and configuration contracts.
+- [x] (2026-09-05) Removed 60 confirmed low-value tests across 20 files, with the exact category and file ledger recorded below.
+- [x] (2026-09-05) Reviewed production seams after deletion; no production simplification was justified because every remaining test-only seam still has retained behavioral consumers or production call sites. Removed only the deleted tests' private helpers (`test_hook_runner` and `REGISTRY_MAPPING`).
+- [x] (2026-09-05) Ran focused/full Rust checks, `just check`, coverage/change-risk/CC gates, dependency advisories, rustdoc, Markdown checks, fixtures, and a release build; the coverage threshold remains the only failing gate.
+- [x] (2026-09-05) Updated issue #502 acceptance notes and linked this completed plan; pushed the branch and opened the pull request.
 
 ## Surprises & Discoveries
 
-- The repository contains 65 Rust files with test attributes, 1,516 test attributes/locations reported by the initial search, 4,081 assertion lines, and 125 snapshot-related calls; the initial counts include production and test support code and will not be used as final removal counts.
+- The repository contains 65 Rust files with test attributes, 1,516 test attributes/locations reported by the initial search, 4,081 assertion lines, and 125 snapshot-related calls; the initial counts include production and test support code and were not used as final removal counts.
 - The project board currently has more than 200 items. The checked-in `scripts/claim-issue.sh` only reads 200 items, so issue #502 had to be claimed with the same documented GraphQL status mutation after verifying the item at a larger limit. This is workflow tooling context, not part of the code change.
+- The coverage recipe reports duplicate `cake-1/...` and `cake/cake-1/...` source roots under this checkout and fails its configured 90% total threshold at 33.66%, while its CRAP regression and cyclomatic-complexity gates pass. The test sweep did not add tests to inflate that metric or change production code to mask it.
 
 ## Decision Log
 
@@ -29,7 +30,19 @@ Cake's tests should protect behavior that users, providers, extensions, and main
 
 ## Outcomes & Retrospective
 
-To be completed before opening the pull request. It will state the exact number of removed tests by category and file, any production simplifications, verification results, and remaining risks.
+The sweep removed 60 tests from 20 files. The categories are intentionally non-overlapping:
+
+- **24 duplicate behavioral checks**, retained behavior in stronger snapshots or neighboring cases: `src/cli/debug.rs` (2), `src/cli/replay.rs` (1), `src/clients/agent/agent_tests.rs` (2), `src/clients/chat_completions_tests.rs` (1), `src/clients/responses_tests.rs` (2), `src/clients/tools/read.rs` (1), `src/config/session.rs` (2), `src/main_tests.rs` (9), and `src/prompts/mod.rs` (6).
+- **23 trivial, derived, no-op, or pass-through checks**: `src/cli/output.rs` (1), `src/cli/sessions.rs` (2), `src/clients/agent/agent_tests.rs` (4), `src/clients/agent_state.rs` (3), `src/clients/tools/bash_tests.rs` (2), `src/clients/tools/mod.rs` (4), `src/clients/tools/toolbox_tests.rs` (2), `src/config/data_dir.rs` (2), `src/config/session.rs` (1), `src/time_format.rs` (1), and `src/types/usage.rs` (1).
+- **13 implementation-coupled or reimplemented checks**: `src/clients/chat_completions_tests.rs` (3), `src/clients/judge_rubric_tests.rs` (1), `src/clients/responses_tests.rs` (1), `src/clients/tools/mod.rs` (4), and `src/types/conversation.rs` (4).
+
+The complete names are preserved in the issue and PR accounting. No production code changed: the only non-production cleanup was removing the deleted tests' private `test_hook_runner` and `REGISTRY_MAPPING` fixtures. Retained tests still cover the documented CLI, exit, provider wire, session JSONL, prompt/configuration, tool/sandbox, hook/toolbox, scheduling, concurrency, and error/security contracts. No documentation or ADR update was needed because no user-visible or durable contract changed.
+
+### Verification
+
+`cargo fmt -- --check`, `cargo test --all-features --quiet`, and `just check` passed. The full local route reached its Linux check, fixture suites, and Rust checks; `scripts/check-coverage.sh` reported total coverage `33.66%` versus the configured `90%` threshold, while CRAP regression and cyclomatic-complexity gates passed. The remaining `just check-full` stages were run independently and passed: `just check-deps`, `just doc`, `just docs-check`, and `just build`.
+
+The coverage failure is an outstanding repository/tooling gate issue, not a behavioral test failure. It is recorded rather than addressed by adding low-value tests.
 
 ## Context and Orientation
 

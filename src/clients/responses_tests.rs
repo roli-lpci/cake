@@ -275,14 +275,6 @@ fn extract_instructions_without_system_message() {
 }
 
 #[test]
-fn extract_instructions_empty_history() {
-    let history: Vec<ConversationItem> = vec![];
-    let (instructions, remaining) = extract_instructions(&history).unwrap();
-    assert!(instructions.is_none());
-    assert!(remaining.is_empty());
-}
-
-#[test]
 fn extract_instructions_system_message_non_first_position_errors() {
     let history = vec![
         ConversationItem::Message {
@@ -408,13 +400,6 @@ fn build_input_orders_repaired_tool_call_before_next_user_message() {
     );
     assert_eq!(input[2]["type"], "message");
     assert_eq!(input[2]["role"], "user");
-}
-
-#[test]
-fn build_input_empty_history() {
-    let history: Vec<ConversationItem> = vec![];
-    let input = build_input(&history);
-    assert!(input.is_empty());
 }
 
 #[test]
@@ -714,17 +699,6 @@ fn parse_output_items_message_without_content() {
     assert!(matches!(&items[0], ConversationItem::Message {
             content, ..
         } if content.is_empty()));
-}
-
-#[test]
-fn provider_config_with_all_returns_none() {
-    let providers = vec!["all".to_string()];
-    let config = if providers.is_empty() || (providers.len() == 1 && providers[0] == "all") {
-        None
-    } else {
-        Some(ProviderConfig { only: providers })
-    };
-    assert!(config.is_none());
 }
 
 #[test]

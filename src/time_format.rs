@@ -30,11 +30,4 @@ mod tests {
         assert_eq!(format_seconds_tenths(1_499), "1.5");
         assert_eq!(format_seconds_tenths(1_500), "1.5");
     }
-
-    #[test]
-    fn seconds_tenths_handles_max_milliseconds_without_overflowing() {
-        let formatted = format_seconds_tenths(u128::MAX);
-
-        assert!(formatted.contains('.'));
-    }
 }
