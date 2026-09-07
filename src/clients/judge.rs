@@ -749,9 +749,9 @@ fn find_git_head(cwd: &std::path::Path) -> Option<std::path::PathBuf> {
 
 /// Strip a single markdown code fence around a verdict payload.
 ///
-/// Accepts ```` ``` ```` or ```` ```json ```` (any language tag) with the
-/// closing fence on its own line. Returns the payload unchanged when it is not
-/// exactly one fenced block.
+/// Accepts ```` ``` ```` or ```` ```json ```` (only an empty or `json`
+/// language tag) with the closing fence on its own line. Returns the payload
+/// unchanged when it is not exactly one fenced block.
 fn strip_markdown_fences(payload: &str) -> &str {
     let trimmed = payload.trim();
     let Some((opening, body)) = trimmed.split_once('\n') else {
