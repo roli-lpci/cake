@@ -1,5 +1,6 @@
 use crate::cli::{CmdRunner, CommandRunOptions};
 use crate::config::model::ApiType;
+use crate::config::skills::{discover_skills_with_paths, parse_skill_path_list};
 use crate::config::{DataDir, ModelDefinition, SettingsLoader};
 use clap::{Parser, Subcommand};
 
@@ -12,6 +13,21 @@ pub struct DebugCommand {
 
 #[derive(Clone, Debug, Subcommand)]
 enum DebugSubcommand {
+    /// Report selected skill catalog size without calling a model
+    Skills {
+        /// Advisory rendered XML budget in Unicode characters
+        #[arg(long, default_value_t = 8000)]
+        catalog_budget: usize,
+        /// Advisory routing-description budget in Unicode characters
+        #[arg(long, default_value_t = 400)]
+        description_budget: usize,
+        /// Report an empty catalog, as for a run with --no-skills
+        #[arg(long)]
+        no_skills: bool,
+        /// Only include these comma-separated skill names
+        #[arg(long, value_name = "NAMES")]
+        skills: Option<String>,
+    },
     /// Show configured models from settings.toml
     Models {
         /// Output model definitions as JSON
@@ -24,21 +40,70 @@ impl CmdRunner for DebugCommand {
     async fn run(
         &self,
         _data_dir: &DataDir,
-        _options: &CommandRunOptions<'_>,
+        options: &CommandRunOptions<'_>,
     ) -> anyhow::Result<()> {
         // CmdRunner is asynchronous, although this command has no async work.
         std::future::ready(()).await;
         match &self.command {
-            DebugSubcommand::Models { json } => {
-                let current_dir = std::env::current_dir()
-                    .map_err(|e| anyhow::anyhow!("Failed to get current directory: {e}"))?;
-                let loaded = SettingsLoader::load(Some(&current_dir))?;
-                loaded.print_warnings();
-                print!("{}", render_models(&loaded.models, *json)?);
-                Ok(())
-            },
+            DebugSubcommand::Skills {
+                catalog_budget,
+                description_budget,
+                no_skills,
+                skills,
+            } => run_skills(
+                *catalog_budget,
+                *description_budget,
+                *no_skills,
+                skills.as_deref(),
+                options.profile,
+            ),
+            DebugSubcommand::Models { json } => run_models(*json),
         }
     }
+}
+
+/// Inspect configured models without setting up an agent session.
+fn run_models(json: bool) -> anyhow::Result<()> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("Failed to get current directory: {e}"))?;
+    let loaded = SettingsLoader::load(Some(&current_dir))?;
+    loaded.print_warnings();
+    print!("{}", render_models(&loaded.models, json)?);
+    Ok(())
+}
+
+/// Inspect the selected skill catalog without setting up an agent session.
+fn run_skills(
+    catalog_budget: usize,
+    description_budget: usize,
+    no_skills: bool,
+    skills: Option<&str>,
+    profile: Option<&str>,
+) -> anyhow::Result<()> {
+    let current_dir = std::env::current_dir()
+        .map_err(|e| anyhow::anyhow!("Failed to get current directory: {e}"))?;
+    let loaded = SettingsLoader::load_with_profile(Some(&current_dir), profile)?;
+    loaded.print_warnings();
+    let roots = loaded
+        .skills
+        .path
+        .as_deref()
+        .map(parse_skill_path_list)
+        .unwrap_or_default();
+    let config = SettingsLoader::resolve_skill_config(no_skills, skills, &loaded.skills);
+    let catalog = config.apply(discover_skills_with_paths(&current_dir, &roots));
+    for diagnostic in &catalog.diagnostics {
+        eprintln!(
+            "Skill diagnostic ({}): {}",
+            diagnostic.file.display(),
+            diagnostic.message
+        );
+    }
+    print!(
+        "{}",
+        catalog.size_report(catalog_budget, description_budget)
+    );
+    Ok(())
 }
 
 fn format_models(models: &std::collections::HashMap<String, ModelDefinition>) -> String {

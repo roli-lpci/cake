@@ -12,6 +12,90 @@ fn cake_env() -> TestEnv {
     TestEnv::new("cake-debug-models-test")
 }
 
+#[cfg(unix)]
+#[test]
+fn debug_skills_deleted_current_directory_is_an_input_error() {
+    for subcommand in ["skills", "models"] {
+        let env = cake_env();
+        let output = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "rmdir \"$1\"; exec \"$2\" debug \"$3\"",
+                "deleted-cwd",
+            ])
+            .arg(&env.workspace_dir)
+            .arg(env.command().get_program())
+            .arg(subcommand)
+            .current_dir(&env.workspace_dir)
+            .env("CAKE_DATA_DIR", &env.data_dir)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(3),
+            "{subcommand}: {:?}",
+            output.stderr
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("Failed to get current directory")
+        );
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn debug_skills_respects_profiles_and_cli_filters_without_a_model() {
+    let env = cake_env();
+    for name in ["short", "long"] {
+        let dir = env.workspace_dir.join(".agents/skills").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: A routing description\n---\nBody\n"),
+        )
+        .unwrap();
+    }
+    env.write_project_settings("[profiles.review.skills]\nonly = [\"short\"]\n");
+    let output = env
+        .command()
+        .args([
+            "--profile",
+            "review",
+            "debug",
+            "skills",
+            "--catalog-budget",
+            "1",
+            "--description-budget",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(report.contains("1 skills"));
+    assert!(report.contains(": short WARNING"));
+    assert!(!report.contains(": long"));
+    assert!(report.contains("WARNING: rendered catalog exceeds"));
+
+    for filter in ["--no-skills", "--skills=absent"] {
+        let output = env
+            .command()
+            .args(["debug", "skills", filter])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("0 skills, 0 bytes, 0 characters")
+        );
+    }
+    assert_eq!(
+        std::fs::read_dir(env.data_dir.join("sessions"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
 #[test]
 fn debug_models_prints_project_models_without_api_key_value() {
     let env = cake_env();
