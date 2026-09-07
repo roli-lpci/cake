@@ -37,7 +37,7 @@ pub struct HookContext {
     /// Sole owner of hook-event emission. The CLI builds it so one closure
     /// fans each record out to session persistence and, for stream-json runs,
     /// to stdout. `None` disables recording.
-    pub hook_event_sink: Option<Arc<dyn Fn(StreamRecord) + Send + Sync>>,
+    pub hook_event_sink: Option<Arc<dyn Fn(StreamRecord) -> anyhow::Result<()> + Send + Sync>>,
     pub cwd: PathBuf,
     pub model: String,
 }
@@ -485,19 +485,31 @@ impl HookRunner {
     ) -> anyhow::Result<AggregatedHookResult> {
         let mut aggregated = AggregatedHookResult::default();
         for outcome in outcomes {
-            self.record_outcome(event, source, tool_metadata, &outcome);
-
-            match &outcome.status {
-                InvocationStatus::Failed(error) => {
-                    apply_failed_status(&mut aggregated, event, source, &outcome, error)?;
-                },
-                InvocationStatus::NoOutput => {},
-                InvocationStatus::Parsed(parsed) => {
-                    apply_parsed_status(&mut aggregated, event, &outcome, parsed)?;
-                },
-            }
+            self.aggregate_hook_outcome(&mut aggregated, event, source, tool_metadata, &outcome)?;
         }
         Ok(aggregated)
+    }
+
+    fn aggregate_hook_outcome(
+        &self,
+        aggregated: &mut AggregatedHookResult,
+        event: HookEvent,
+        source: &HookSource,
+        tool_metadata: Option<&ToolHookMetadata>,
+        outcome: &InvocationOutcome,
+    ) -> anyhow::Result<()> {
+        self.record_outcome(event, source, tool_metadata, outcome)?;
+
+        match &outcome.status {
+            InvocationStatus::Failed(error) => {
+                apply_failed_status(aggregated, event, source, outcome, error)?;
+            },
+            InvocationStatus::NoOutput => {},
+            InvocationStatus::Parsed(parsed) => {
+                apply_parsed_status(aggregated, event, outcome, parsed)?;
+            },
+        }
+        Ok(())
     }
 
     fn payload(&self, event: HookEvent, extra: Value) -> Value {
@@ -531,7 +543,7 @@ impl HookRunner {
         source: &HookSource,
         tool_metadata: Option<&ToolHookMetadata>,
         outcome: &InvocationOutcome,
-    ) {
+    ) -> anyhow::Result<()> {
         let stderr_bytes = outcome.stderr.len();
         let stdout_bytes = outcome.stdout.len();
         let failed = matches!(outcome.status, InvocationStatus::Failed(_));
@@ -608,9 +620,14 @@ impl HookRunner {
             stderr: outcome.stderr.clone(),
         };
 
+        self.emit_hook_record(StreamRecord::HookEvent(record))
+    }
+
+    fn emit_hook_record(&self, record: StreamRecord) -> anyhow::Result<()> {
         if let Some(sink) = &self.context.hook_event_sink {
-            sink(StreamRecord::HookEvent(record));
+            sink(record)?;
         }
+        Ok(())
     }
 }
 
