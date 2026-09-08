@@ -77,6 +77,12 @@ jobs:
       - name: pr recipe fixture tests
         shell: bash
         run: scripts/test-just-pr.sh
+      - name: Evaluation harness fixture tests
+        if: steps.filter.outputs.coverage == 'true'
+        run: just eval-check
+      - name: Session-metrics fixture tests
+        if: steps.filter.outputs.coverage == 'true'
+        run: just session-metrics-check
 
   linux-check:
     name: Linux Check
