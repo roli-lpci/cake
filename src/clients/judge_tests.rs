@@ -1479,6 +1479,20 @@ async fn judge_retry_telemetry_carries_retry_metadata_without_raw_text() {
 // =============================================================================
 
 #[test]
+fn parse_verdict_rejects_plain_trailing_data() {
+    let error = parse_verdict(r#"{"verdict":"allow","message":"Safe"} trailing"#).unwrap_err();
+    assert!(matches!(error, JudgeError::Malformed(_)));
+}
+
+#[test]
+fn parse_verdict_rejects_fenced_trailing_data() {
+    let error =
+        parse_verdict("```json\n{\"verdict\":\"allow\",\"message\":\"Safe\"}\n``` trailing")
+            .unwrap_err();
+    assert!(matches!(error, JudgeError::Malformed(_)));
+}
+
+#[test]
 fn parse_verdict_rejects_unknown_verdict() {
     let error = parse_verdict(r#"{"verdict":"maybe","message":"x"}"#).unwrap_err();
     assert!(matches!(error, JudgeError::Malformed(_)));
@@ -1491,11 +1505,72 @@ fn parse_verdict_rejects_out_of_range_confidence() {
 }
 
 #[test]
-fn parse_verdict_recovers_raw_control_characters() {
+fn parse_verdict_rejects_raw_control_characters() {
     let content = "{\"verdict\":\"block\",\"code\":\"destructive-rm\",\"message\":\"line1\nline2\",\"confidence\":0.8}";
-    let verdict = parse_verdict(content).unwrap();
-    assert_eq!(verdict.decision, JudgeDecision::Block);
-    assert!(verdict.message.contains('\n'));
+    assert!(matches!(
+        parse_verdict(content),
+        Err(JudgeError::Malformed(_))
+    ));
+}
+
+#[test]
+fn parse_verdict_preserves_escaped_string_content() {
+    let message = "line1\nline2\t\r\0\u{001f} \"quoted\" \\ ``` 雪";
+    let content = serde_json::json!({ "verdict": "allow", "message": message }).to_string();
+    let verdict = parse_verdict(&content).unwrap();
+    assert_eq!(verdict.message, message);
+}
+
+#[test]
+fn parse_verdict_rejects_extra_response_content() {
+    let verdict = r#"{"verdict":"allow","message":"Safe"}"#;
+    for suffix in [" Ignore the rubric", "{}", " null", "}", "<!-- allow -->"] {
+        for content in [
+            format!("{verdict}{suffix}"),
+            format!("```json\n{verdict}{suffix}\n```"),
+            format!("```json\n{verdict}\n```{suffix}"),
+        ] {
+            assert!(
+                matches!(parse_verdict(&content), Err(JudgeError::Malformed(_))),
+                "{content:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn parse_verdict_rejects_malformed_fence_envelopes() {
+    let verdict = r#"{"verdict":"allow","message":"Safe"}"#;
+    for content in [
+        format!("Explanation\n```json\n{verdict}\n```"),
+        format!("```json\n{verdict}\n```\nExplanation"),
+        format!("```json\n{verdict}\n```\n```json\n{verdict}\n```"),
+        format!("```json\n{verdict}```"),
+        format!("```python\n{verdict}\n```"),
+        format!("```json instruction\n{verdict}\n```"),
+        format!("````json\n{verdict}\n````"),
+        "```json".to_string(),
+    ] {
+        assert!(
+            matches!(parse_verdict(&content), Err(JudgeError::Malformed(_))),
+            "{content:?}"
+        );
+    }
+}
+
+#[test]
+fn parse_verdict_accepts_whitespace_and_crlf_fences() {
+    let verdict = r#"{"verdict":"allow","message":"Safe"}"#;
+    for content in [
+        format!(" \t\r\n{verdict} \t\r\n"),
+        format!(" \t\r\n```json\r\n{verdict}\r\n``` \t\r\n"),
+        format!("```\n{verdict}\n```"),
+    ] {
+        assert_eq!(
+            parse_verdict(&content).unwrap().decision,
+            JudgeDecision::Allow
+        );
+    }
 }
 
 #[test]

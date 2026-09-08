@@ -35,7 +35,6 @@ use serde::{Deserialize, Serialize};
 use crate::clients::agent_runner::build_http_client;
 use crate::clients::judge_rubric::{VerdictCode, build_judge_system_prompt};
 use crate::clients::retry::RetryPolicy;
-use crate::clients::tools::repair_json_args;
 use crate::config::model::ResolvedModelConfig;
 use crate::config::settings::{JudgeSettings, ModelDefinition};
 use crate::session_telemetry::{
@@ -578,13 +577,12 @@ fn assistant_message(items: &[ConversationItem]) -> Option<&str> {
 
 /// Parse the assistant's text into a [`JudgeVerdict`].
 ///
-/// Strips a single markdown code fence (models wrap JSON in fences despite
-/// the rubric's instruction), then tries strict JSON, then the conservative
-/// shared JSON repair (escaped control characters, trailing garbage). Anything
-/// else is [`JudgeError::Malformed`]; malformed verdicts fail closed.
+/// Strips a single complete markdown code fence (models wrap JSON in fences
+/// despite the rubric's instruction), then parses the entire payload as strict
+/// JSON. Tool-argument repair must not truncate or repair this security gate's
+/// response. Anything else is [`JudgeError::Malformed`] and fails closed.
 fn parse_verdict(content: &str) -> Result<JudgeVerdict, JudgeError> {
-    let repaired = repair_json_args(strip_markdown_fences(content.trim()));
-    let mut verdict: JudgeVerdict = serde_json::from_str(&repaired)
+    let mut verdict: JudgeVerdict = serde_json::from_str(strip_markdown_fences(content))
         .map_err(|e| JudgeError::Malformed(format!("could not parse judge verdict JSON: {e}")))?;
     validate_verdict_codes(&mut verdict)?;
     if let Some(confidence) = verdict.confidence
@@ -751,25 +749,23 @@ fn find_git_head(cwd: &std::path::Path) -> Option<std::path::PathBuf> {
 
 /// Strip a single markdown code fence around a verdict payload.
 ///
-/// Accepts ```` ``` ```` or ```` ```json ```` (any language tag) with the
-/// closing fence on its own line. Returns the payload unchanged when it is not
-/// exactly one fenced block.
+/// Accepts ```` ``` ```` or ```` ```json ```` (only an empty or `json`
+/// language tag) with the closing fence on its own line. Returns the payload
+/// unchanged when it is not exactly one fenced block.
 fn strip_markdown_fences(payload: &str) -> &str {
     let trimmed = payload.trim();
-    let Some(rest) = trimmed.strip_prefix("```") else {
+    let Some((opening, body)) = trimmed.split_once('\n') else {
         return trimmed;
     };
-    // Skip the optional language tag and the opening fence's newline.
-    let Some(after_open) = rest.find('\n') else {
+    let ("```" | "```json") = opening.trim_end() else {
         return trimmed;
     };
-    let Some(body) = rest.get(after_open + 1..) else {
+    // Only a closing fence on its own final line may be removed. Any suffix
+    // remains in the payload and makes strict JSON parsing fail closed.
+    let Some(body) = body.strip_suffix("\n```") else {
         return trimmed;
     };
-    let Some(after_close) = body.rfind("```") else {
-        return trimmed;
-    };
-    body.get(..after_close).map_or(trimmed, str::trim)
+    body.trim()
 }
 
 #[cfg(test)]
