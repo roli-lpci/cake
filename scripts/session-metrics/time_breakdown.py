@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Where invocation wall-clock time goes: model API vs tool execution vs retry
-waits vs unaccounted overhead, plus turn pacing, think time between tasks, and
-the slowest individual operations.
+"""Invocation wall-clock context alongside recorded API time, cumulative tool
+work, and scheduled retry delays, plus turn pacing, think time between tasks,
+and the slowest individual operations.
 
 Wall time comes from telemetry session_summary; API time from api_attempt
-total_ms (request + response parsing); tool time from tool_call duration_ms;
-retry waits from retry_scheduled delay_ms. Hook time is reported from
-transcript hook_event records (it overlaps the tool path, so it is shown for
-scale, not added to the breakdown). Think time is the transcript gap between a
-task_complete and the next task_start in the same session.
+total_ms (request + response parsing); cumulative tool work from tool_call
+duration_ms; scheduled retry delay from retry_scheduled delay_ms. Tool records
+have no execution intervals, and retry records have no observed wait duration,
+so the report does not derive an exclusive remainder from them. Hook time is
+reported from transcript hook_event records (it overlaps the tool path, so it
+is shown for scale, not added to the breakdown). Think time is the transcript
+gap between a task_complete and the next task_start in the same session.
 """
 
 import cakelib
@@ -19,46 +21,61 @@ def run(data: cakelib.Dataset) -> None:
     print_header("TIME BREAKDOWN")
     print(cakelib.describe_window(data))
 
-    complete = [inv for inv in data.invocations if inv.summary]
-    if not complete:
-        print("\nNo telemetry session_summary records in window.")
+    if not data.invocations:
+        print("\nNo telemetry invocations in window.")
         return
 
-    wall = api = tools = retry_wait = parse = 0
-    for inv in complete:
-        wall += inv.summary["duration_ms"]
+    complete = [inv for inv in data.invocations if inv.summary]
+    incomplete = len(data.invocations) - len(complete)
+    wall = sum(inv.summary["duration_ms"] for inv in complete)
+    api = tools = retry_wait = parse = 0
+    for inv in data.invocations:
         api += sum(a.get("total_ms", 0) for a in inv.attempts)
         parse += sum(a.get("parse_ms", 0) for a in inv.attempts)
         tools += sum(t.get("duration_ms", 0) for t in inv.tool_calls)
         retry_wait += sum(r.get("delay_ms", 0) for r in inv.retries)
-    other = max(0, wall - api - tools - retry_wait)
 
-    print(f"\nAcross {fmt_int(len(complete))} invocations "
-          f"({fmt_ms(wall)} total wall time):")
+    if complete:
+        print(f"\nAcross {fmt_int(len(complete))} complete invocations: "
+              f"{fmt_ms(wall)} total wall time.")
+    else:
+        print("\nNo complete invocation wall time is available in this window.")
+    print(f"\nRecorded activity across {fmt_int(len(data.invocations))} telemetry "
+          "invocations (includes incomplete invocations):")
     print_table(
-        ["where", "time", "share of wall"],
+        ["activity", "recorded duration", "interpretation"],
         [
-            ["model API (request+parse)", fmt_ms(api), fmt_pct(api, wall)],
-            ["  of which response parsing", fmt_ms(parse), fmt_pct(parse, wall)],
-            ["tool execution", fmt_ms(tools), fmt_pct(tools, wall)],
-            ["retry backoff waits", fmt_ms(retry_wait), fmt_pct(retry_wait, wall)],
-            ["other (streaming, transcript writes, ...)", fmt_ms(other), fmt_pct(other, wall)],
+            ["model API (request+parse)", fmt_ms(api), "elapsed per attempt"],
+            ["  of which response parsing", fmt_ms(parse), "subset of API"],
+            ["tool execution (cumulative work)", fmt_ms(tools), "may overlap"],
+            ["scheduled retry delay", fmt_ms(retry_wait), "actual wait not measured"],
         ],
     )
+    print("\nExclusive remainder is unavailable: tool calls record durations without "
+          "execution intervals, and actual retry wait elapsed time is unavailable "
+          "because telemetry records only the scheduled delay.")
+    if incomplete:
+        noun = "invocation" if incomplete == 1 else "invocations"
+        verb = "has" if incomplete == 1 else "have"
+        print(f"{fmt_int(incomplete)} incomplete {noun} {verb} no session_summary; "
+              "only their wall time and turn pacing are unavailable.")
 
-    print("\nTool time by tool:")
-    tel_calls = [tc for inv in complete for tc in inv.tool_calls]
+    print("\nCumulative tool work by tool:")
+    tel_calls = [tc for inv in data.invocations for tc in inv.tool_calls]
     rows = []
     for tool, calls in sorted(cakelib.group_by(tel_calls, lambda t: t["name"]).items(),
                               key=lambda kv: -sum(c.get("duration_ms", 0) for c in kv[1])):
         tool_time = sum(c.get("duration_ms", 0) for c in calls)
         rows.append([tool, fmt_int(len(calls)), fmt_ms(tool_time),
-                     fmt_pct(tool_time, tools), fmt_pct(tool_time, wall)])
-    print_table(["tool", "calls", "time", "share of tool time", "share of wall"], rows)
+                     fmt_pct(tool_time, tools)])
+    print_table(
+        ["tool", "calls", "cumulative time", "share of cumulative tool work"],
+        rows,
+    )
 
     print("\nAPI time by model:")
     rows = []
-    by_model = cakelib.group_by(complete, lambda inv: inv.model)
+    by_model = cakelib.group_by(data.invocations, lambda inv: inv.model)
     for model, invs in sorted(by_model.items(), key=lambda kv: -len(kv[1])):
         model_api = sum(a.get("total_ms", 0) for inv in invs for a in inv.attempts)
         attempts = sum(len(inv.attempts) for inv in invs)
@@ -113,7 +130,7 @@ def run(data: cakelib.Dataset) -> None:
     )
 
     print("\nSlowest API attempts:")
-    all_attempts = [(inv, a) for inv in complete for a in inv.attempts]
+    all_attempts = [(inv, a) for inv in data.invocations for a in inv.attempts]
     slowest = sorted(all_attempts, key=lambda ia: -ia[1].get("total_ms", 0))[:5]
     print_table(
         ["model", "duration", "input tokens", "session"],
